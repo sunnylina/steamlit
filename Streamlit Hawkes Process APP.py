@@ -262,8 +262,8 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
                 'raw_score': 0.0,
                 'anomaly_score': 0.0,
                 'historical_influence': historical_influence,
-                'normalized_feature': 0.0,  # 로그 변환된 값 저장 필드로 유지
-                'proc_normalized': 0.0,  # 로그 변환된 값 저장 필드로 유지
+                'log_user_diff': 0.0,  # 로그 변환된 값 저장 필드로 유지
+                'log_proc_diff': 0.0,  # 로그 변환된 값 저장 필드로 유지
                 'intensity': intensity.item(),
                 'is_anomaly': False,
                 'is_warmup': True  # 웜업 기간 표시
@@ -359,8 +359,8 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
                     'raw_score': raw_score,
                     'anomaly_score': anomaly_score,
                     'historical_influence': historical_influence,
-                    'normalized_feature': user_log_diff,  # 필드명 유지하지만 로그 차이값 저장
-                    'proc_normalized': proc_log_diff,  # 필드명 유지하지만 로그 차이값 저장
+                    'log_user_diff': user_log_diff,  # 필드명 유지하지만 로그 차이값 저장
+                    'log_proc_diff': proc_log_diff,  # 필드명 유지하지만 로그 차이값 저장
                     'intensity': intensity.item(),
                     'is_anomaly': is_anomaly,
                     'is_warmup': False  # 웜업 기간 아님
@@ -375,8 +375,8 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
                     'raw_score': 0.0,
                     'anomaly_score': 0.0,
                     'historical_influence': historical_influence,
-                    'normalized_feature': 0.0,
-                    'proc_normalized': 0.0,
+                    'log_user_diff': 0.0,
+                    'log_proc_diff': 0.0,
                     'intensity': intensity.item(),
                     'is_anomaly': False,
                     'is_warmup': False
@@ -501,8 +501,8 @@ def main():
     uploaded_file = st.sidebar.file_uploader("CSV 파일을 업로드해주세요! 😊", type=['csv'])
 
     # 메인 페이지 제목
-    st.title("🧊 시계열 이상 탐지 시스템")
-    st.markdown("#### 🌟 Marked Hawkes Process를 사용한 시계열 이상 탐지")
+    st.title("🧊 시계열 이상치 탐지 시스템")
+    st.markdown("#### 🌟 Marked Hawkes Process를 사용한 이상치 탐지")
 
     if uploaded_file is not None:
         # 데이터 로드
