@@ -162,6 +162,10 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
     # 사용자 지정 파라미터로 기본값 업데이트
     params = {**default_params, **params}
 
+    # 시간 순으로 정렬
+    df = df.sort_values(by=params['time_col']).reset_index(drop=True)
+    original_df = original_df.sort_values(by=params['time_col']).reset_index(drop=True)
+
     # 모든 사용자(IP)를 가져오기
     unique_users = df[params['user_col']].unique()
 
@@ -245,8 +249,27 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
         model = models[user_id]
         intensity = model(user_id_tensor, proc_id, feature)
 
-        # IP별 웜업 기간 확인 후 이상치 탐지 (웜업 기간 이후에만)
-        if event_counts[user_id] > params['warm_up_period']:
+        # 웜업 기간 여부 확인 및 모든 데이터 결과 포함
+        is_warmup = event_counts[user_id] <= params['warm_up_period']
+
+        if is_warmup:
+            # 웜업 기간 데이터도 결과에 포함 (이상치 점수는 0으로 설정)
+            results.append({
+                'time': original_data[params['time_col']],
+                'user': original_data[params['user_col']],
+                'process': original_data[params['proc_col']],
+                'bytes': original_data[params['bytes_col']],
+                'raw_score': 0.0,
+                'anomaly_score': 0.0,
+                'historical_influence': historical_influence,
+                'normalized_feature': 0.0,  # 로그 변환된 값 저장 필드로 유지
+                'proc_normalized': 0.0,  # 로그 변환된 값 저장 필드로 유지
+                'intensity': intensity.item(),
+                'is_anomaly': False,
+                'is_warmup': True  # 웜업 기간 표시
+            })
+        else:
+            # 웜업 기간 이후의 이상치 탐지 로직
             proc_history = [h for h in history if h['proc_id'].item() == proc_id.item()]
 
             if len(history) >= params['min_events_for_anomaly']:
@@ -254,35 +277,42 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
                 clipped_intensity = torch.clamp(intensity, min=1e-10)
                 base_score = torch.abs(1.0 / clipped_intensity).item()  # 강도의 역수를 사용
 
-                # 사용자 및 프로세스별 통계 계산
-                user_features = [h['feature'].item() for h in history]
-                user_mean = np.mean(user_features)
-                user_std = np.std(user_features) + 1e-6
-
-                proc_features = [h['feature'].item() for h in proc_history] if proc_history else user_features
-                proc_mean = np.mean(proc_features)
-                proc_std = np.std(proc_features) + 1e-6
-
-                # 정규화된 특성값 계산
+                # 현재 특성값 가져오기
                 current_feature = feature.item()
-                normalized_feature = abs(current_feature - user_mean) / user_std
-                proc_normalized = abs(current_feature - proc_mean) / proc_std
 
-                # 기본 이상치 점수 계산 - 가중치 조정으로 점수 범위 확대
+                # ===== 로그 변환 적용 (정규화 대체) =====
+                # 값이 0인 경우를 대비해 log1p 사용 (log(1+x))
+                log_current = np.log1p(current_feature)
+
+                # 사용자별 로그 통계 계산
+                user_features = [h['feature'].item() for h in history]
+                log_user_features = [np.log1p(f) for f in user_features]
+                log_user_mean = np.mean(log_user_features)
+
+                # 프로세스별 로그 통계 계산
+                proc_features = [h['feature'].item() for h in proc_history] if proc_history else user_features
+                log_proc_features = [np.log1p(f) for f in proc_features]
+                log_proc_mean = np.mean(log_proc_features)
+
+                # 로그 변환 기반 차이 계산 (절대값)
+                user_log_diff = abs(log_current - log_user_mean)
+                proc_log_diff = abs(log_current - log_proc_mean)
+
+                # 기본 이상치 점수 계산 (로그 변환된 값 사용)
                 raw_score = base_score * \
                             (1 + np.log1p(historical_influence)) * \
-                            (1 + np.sqrt(normalized_feature)) * \
-                            (1 + np.sqrt(proc_normalized))
+                            (1 + user_log_diff) * \
+                            (1 + proc_log_diff)
 
-                # 점수 클리핑 - 너무 큰 값 방지
+                # 점수 클리핑
                 raw_score = min(raw_score, params['score_max'])
 
                 # 최근 점수 윈도우에 추가
                 recent_scores.append(raw_score)
                 if len(recent_scores) > score_window_size:
-                    recent_scores.pop(0)  # 가장 오래된 점수 제거
+                    recent_scores.pop(0)
 
-                # 점수 정규화 및 변환 - 더 넓은 분포 생성
+                # 점수 정규화 및 변환
                 if len(recent_scores) > 100:
                     # 현재 점수의 백분위 계산 (0~1)
                     percentile = sum(1 for s in recent_scores if s <= raw_score) / len(recent_scores)
@@ -320,19 +350,36 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
                 # 이상치 판단 (정규화된 점수 기준)
                 is_anomaly = anomaly_score > params['threshold']
 
-                # 인코딩된 값 대신 원본 값 사용
+                # 결과 저장 (필드명은 유지하되 내용은 로그 변환 값으로 변경)
                 results.append({
                     'time': original_data[params['time_col']],
-                    'user': original_data[params['user_col']],  # 원본 IP 주소
-                    'process': original_data[params['proc_col']],  # 원본 프로세스 이름
+                    'user': original_data[params['user_col']],
+                    'process': original_data[params['proc_col']],
                     'bytes': original_data[params['bytes_col']],
-                    'raw_score': raw_score,  # 정규화 전 원본 점수
-                    'anomaly_score': anomaly_score,  # 정규화된 최종 점수 (0~100)
+                    'raw_score': raw_score,
+                    'anomaly_score': anomaly_score,
                     'historical_influence': historical_influence,
-                    'normalized_feature': normalized_feature,
-                    'proc_normalized': proc_normalized,
+                    'normalized_feature': user_log_diff,  # 필드명 유지하지만 로그 차이값 저장
+                    'proc_normalized': proc_log_diff,  # 필드명 유지하지만 로그 차이값 저장
                     'intensity': intensity.item(),
-                    'is_anomaly': is_anomaly
+                    'is_anomaly': is_anomaly,
+                    'is_warmup': False  # 웜업 기간 아님
+                })
+            else:
+                # 충분한 이력이 없는 경우도 결과에 포함
+                results.append({
+                    'time': original_data[params['time_col']],
+                    'user': original_data[params['user_col']],
+                    'process': original_data[params['proc_col']],
+                    'bytes': original_data[params['bytes_col']],
+                    'raw_score': 0.0,
+                    'anomaly_score': 0.0,
+                    'historical_influence': historical_influence,
+                    'normalized_feature': 0.0,
+                    'proc_normalized': 0.0,
+                    'intensity': intensity.item(),
+                    'is_anomaly': False,
+                    'is_warmup': False
                 })
 
         # 모델 업데이트 (현재 사용자의 모델만 업데이트)
@@ -390,13 +437,16 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
     status_text.empty()
     loss_text.empty()
 
+    # 결과를 데이터프레임으로 변환
+    results_df = pd.DataFrame(results)
+
     # 모든 IP의 손실을 하나의 리스트로 결합 (시각화용)
     combined_losses = []
     for u_id in unique_users:
         combined_losses.extend(all_losses[u_id])
 
     # 첫 번째 모델을 반환 (호환성 위해)
-    return models[unique_users[0]], pd.DataFrame(results), histories, combined_losses
+    return models[unique_users[0]], results_df, histories, combined_losses
 
 
 # 결과 분석 및 시각화 함수
