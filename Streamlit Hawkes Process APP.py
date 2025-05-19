@@ -45,7 +45,7 @@ st.markdown("""
 def preprocess_edr_data(df, user_col, proc_col, time_col, bytes_col, impute_method='knn'):
     df_processed = df.copy()
 
-    # 레이블 인코딩 - 사용자 및 프로세스를 숫자로 변환
+    # 레이블 인코딩 - Anomaly Split 및 프로세스를 숫자로 변환
     user_encoder = LabelEncoder()
     proc_encoder = LabelEncoder()
 
@@ -86,7 +86,7 @@ class EDR_OnlineDMHP(torch.nn.Module):
             'decay_rate': 0.05,
             'min_events_for_anomaly': 10
         }
-        # 사용자 지정 파라미터로 기본값 업데이트
+        # Anomaly Split 지정 파라미터로 기본값 업데이트
         self.params = {**self.default_params, **params}
 
         self.num_users = num_users
@@ -159,7 +159,7 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
         'score_max': 100.0  # 원본 점수의 최대 제한값
     }
 
-    # 사용자 지정 파라미터로 기본값 업데이트
+    # Anomaly Split 지정 파라미터로 기본값 업데이트
     params = {**default_params, **params}
 
     # 시간 순으로 정렬
@@ -220,7 +220,7 @@ def edr_online_train_and_detect(df, num_users, num_processes, user_encoder, proc
         current_data = df.iloc[i]
         original_data = original_df.iloc[i]  # 원본 데이터(인코딩 전)에 접근
 
-        # 현재 데이터의 사용자 ID
+        # 현재 데이터의 Anomaly Split ID
         user_id = current_data[params['user_col']]
         user_id_tensor = torch.tensor([user_id], dtype=torch.long)
         proc_id = torch.tensor([current_data[params['proc_col']]], dtype=torch.long)
@@ -501,8 +501,8 @@ def main():
     uploaded_file = st.sidebar.file_uploader("CSV 파일을 업로드해주세요! 😊", type=['csv'])
 
     # 메인 페이지 제목
-    st.title("💝 IP 기반 시계열 이상치 탐지 시스템")
-    st.markdown("#### 🌟 마크된 Hawkes Process를 사용한 IP별 이상치 탐지")
+    st.title("🧊 시계열 이상 탐지 시스템")
+    st.markdown("#### 🌟 Marked Hawkes Process를 사용한 시계열 이상 탐지")
 
     if uploaded_file is not None:
         # 데이터 로드
@@ -511,9 +511,9 @@ def main():
         # 사이드바에 파라미터 설정
         st.sidebar.markdown("### ⚙️ 컬럼 설정")
         time_col = st.sidebar.selectbox("시간 컬럼을 선택해주세요 ⏰", df.columns)
-        user_col = st.sidebar.selectbox("사용자 컬럼을 선택해주세요 👤", df.columns)
-        proc_col = st.sidebar.selectbox("프로세스 컬럼을 선택해주세요 🔄", df.columns)
-        bytes_col = st.sidebar.selectbox("바이트 전송량 컬럼을 선택해주세요 📊", df.columns)
+        user_col = st.sidebar.selectbox("Anomaly Split 컬럼을 선택해주세요 👤", df.columns)
+        proc_col = st.sidebar.selectbox("Mark 컬럼을 선택해주세요 🔄", df.columns)
+        bytes_col = st.sidebar.selectbox("Numerical 컬럼을 선택해주세요 📊", df.columns)
 
         st.sidebar.markdown("### 🎯 모델 파라미터")
         lr = st.sidebar.number_input("Learning Rate ✨", value=0.0005, format="%.4f")
